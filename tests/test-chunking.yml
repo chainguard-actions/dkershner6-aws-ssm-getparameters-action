@@ -1,0 +1,49 @@
+name: Test chunking of more than 10 parameters
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Start mock SSM endpoint
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-mock-ssm.sh"
+      - id: action
+        uses: .
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+          NODE_EXTRA_CA_CERTS: /tmp/mock-ssm/cert.pem
+        with:
+          parameterPairs: /p/1=P1,/p/2=P2,/p/3=P3,/p/4=P4,/p/5=P5,/p/6=P6,/p/7=P7,/p/8=P8,/p/9=P9,/p/10=P10,/p/11=P11,/p/12=P12
+          withDecryption: "false"
+      - name: Assert all 12 env vars exported
+        run: |
+          for i in $(seq 1 12); do
+            name="P$i"
+            val="${!name}"
+            echo "$name=$val"
+            if [ "$val" != "value-for-p-$i" ]; then
+              echo "FAIL: $name expected 'value-for-p-$i'"
+              exit 1
+            fi
+          done
+          echo "PASS"
+      - name: Assert two GetParameters requests (10 + 2)
+        run: |
+          cat /tmp/mock-ssm/requests.log
+          python3 - <<'EOF'
+          import json, sys
+          lines = [json.loads(l) for l in open("/tmp/mock-ssm/requests.log") if l.strip()]
+          if len(lines) != 2:
+              sys.exit("FAIL: expected 2 requests, got %d" % len(lines))
+          sizes = sorted(len(r["body"].get("Names", [])) for r in lines)
+          if sizes != [2, 10]:
+              sys.exit("FAIL: expected chunk sizes [2, 10], got %r" % sizes)
+          print("PASS")
+          EOF

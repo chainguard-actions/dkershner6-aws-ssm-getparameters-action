@@ -1,0 +1,43 @@
+name: Test whitespace in parameterPairs is trimmed
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Start mock SSM endpoint
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-mock-ssm.sh"
+      - id: action
+        uses: .
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+          NODE_EXTRA_CA_CERTS: /tmp/mock-ssm/cert.pem
+        with:
+          parameterPairs: " /svc/alpha = ALPHA_VAR ,  /svc/beta=BETA_VAR "
+      - name: Assert trimmed names used
+        run: |
+          echo "ALPHA_VAR length: ${#ALPHA_VAR}"
+          echo "BETA_VAR length: ${#BETA_VAR}"
+          if [ "$ALPHA_VAR" != "value-for-svc-alpha" ]; then
+            echo "FAIL: ALPHA_VAR not set to expected value"
+            exit 1
+          fi
+          if [ "$BETA_VAR" != "value-for-svc-beta" ]; then
+            echo "FAIL: BETA_VAR not set to expected value"
+            exit 1
+          fi
+          cat /tmp/mock-ssm/requests.log
+          python3 - <<'EOF'
+          import json, sys
+          req = json.loads(open("/tmp/mock-ssm/requests.log").readline())
+          if sorted(req["body"].get("Names", [])) != ["/svc/alpha", "/svc/beta"]:
+              sys.exit("FAIL: names not trimmed: %r" % req["body"].get("Names"))
+          EOF
+          echo "PASS"

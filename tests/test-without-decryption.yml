@@ -1,0 +1,47 @@
+name: Test withDecryption false
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Start mock SSM endpoint
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-mock-ssm.sh"
+      - id: action
+        uses: .
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+          NODE_EXTRA_CA_CERTS: /tmp/mock-ssm/cert.pem
+        with:
+          parameterPairs: /config/region=CONFIG_REGION
+          withDecryption: "false"
+      - name: Assert env var exported
+        run: |
+          echo "CONFIG_REGION: $CONFIG_REGION"
+          if [ "$CONFIG_REGION" != "value-for-config-region" ]; then
+            echo "FAIL: CONFIG_REGION not set to expected value"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert WithDecryption false sent
+        run: |
+          cat /tmp/mock-ssm/requests.log
+          python3 - <<'EOF'
+          import json, sys
+          lines = [l for l in open("/tmp/mock-ssm/requests.log") if l.strip()]
+          if len(lines) != 1:
+              sys.exit("FAIL: expected 1 request, got %d" % len(lines))
+          req = json.loads(lines[0])
+          if req["body"].get("Names") != ["/config/region"]:
+              sys.exit("FAIL: unexpected Names %r" % req["body"].get("Names"))
+          if req["body"].get("WithDecryption") is not False:
+              sys.exit("FAIL: expected WithDecryption false, got %r" % req["body"].get("WithDecryption"))
+          print("PASS")
+          EOF

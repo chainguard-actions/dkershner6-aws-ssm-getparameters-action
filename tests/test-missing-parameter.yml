@@ -1,0 +1,36 @@
+name: Test parameter not found in SSM
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Start mock SSM endpoint
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-mock-ssm.sh"
+      - id: action
+        uses: .
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+          NODE_EXTRA_CA_CERTS: /tmp/mock-ssm/cert.pem
+        with:
+          parameterPairs: /present/one=PRESENT_ONE,/missing/two=MISSING_TWO
+      - name: Assert present var set and missing var unset
+        run: |
+          echo "PRESENT_ONE length: ${#PRESENT_ONE}"
+          echo "MISSING_TWO set: ${MISSING_TWO+yes}"
+          if [ "$PRESENT_ONE" != "value-for-present-one" ]; then
+            echo "FAIL: PRESENT_ONE not set to expected value"
+            exit 1
+          fi
+          if [ -n "${MISSING_TWO+x}" ]; then
+            echo "FAIL: MISSING_TWO should not be exported"
+            exit 1
+          fi
+          echo "PASS"

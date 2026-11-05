@@ -1,0 +1,55 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Start mock SSM endpoint
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-mock-ssm.sh"
+      - id: action
+        uses: .
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+          NODE_EXTRA_CA_CERTS: /tmp/mock-ssm/cert.pem
+        with:
+          parameterPairs: /app/db/password=DB_PASSWORD,/app/api/key=API_KEY
+      - name: Assert env vars exported
+        run: |
+          echo "DB_PASSWORD length: ${#DB_PASSWORD}"
+          echo "API_KEY length: ${#API_KEY}"
+          if [ "$DB_PASSWORD" != "value-for-app-db-password" ]; then
+            echo "FAIL: DB_PASSWORD not set to expected value"
+            exit 1
+          fi
+          if [ "$API_KEY" != "value-for-app-api-key" ]; then
+            echo "FAIL: API_KEY not set to expected value"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert request sent to SSM GetParameters with decryption
+        run: |
+          cat /tmp/mock-ssm/requests.log
+          COUNT=$(grep -c . /tmp/mock-ssm/requests.log || true)
+          if [ "$COUNT" != "1" ]; then
+            echo "FAIL: expected 1 request, got $COUNT"
+            exit 1
+          fi
+          python3 - <<'EOF'
+          import json, sys
+          req = json.loads(open("/tmp/mock-ssm/requests.log").readline())
+          if req["target"] != "AmazonSSM.GetParameters":
+              sys.exit("FAIL: unexpected target %r" % req["target"])
+          if sorted(req["body"].get("Names", [])) != ["/app/api/key", "/app/db/password"]:
+              sys.exit("FAIL: unexpected Names %r" % req["body"].get("Names"))
+          if req["body"].get("WithDecryption") is not True:
+              sys.exit("FAIL: expected WithDecryption true, got %r" % req["body"].get("WithDecryption"))
+          print("PASS")
+          EOF
