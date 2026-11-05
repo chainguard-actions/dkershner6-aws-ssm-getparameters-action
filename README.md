@@ -1,0 +1,1 @@
+# dkershner6-aws-ssm-getparameters-action
